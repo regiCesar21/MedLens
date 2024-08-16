@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 import constants
 
-DATA_DIR = os.path.expanduser("~/dataset/mimic-iii-1.4")
+DATA_DIR = os.path.expanduser("~/dataset/mimic-iii-1.4/reduced30StratNew")
 LOGS_PER_SUBJECT_ID_DISCHTIME_DIR = os.path.expanduser("~/dataset/processed/logs_per_SUBJECT_ID_DISCHTIME")
 LOGS_PER_ITEMID_DIR = os.path.expanduser("~/dataset/processed/logs_per_ITEMID")
 
@@ -108,11 +108,11 @@ def main():
     if not os.path.exists(LOGS_PER_ITEMID_DIR):
         os.makedirs(LOGS_PER_ITEMID_DIR)
 
-    create_header_files(expire_flags, constants.HARUTYUNYAN_2019_MULTITASK_ITEMID_CHARTEVENTS,
-                        constants.HARUTYUNYAN_2019_MULTITASK_ITEMID_LABEVENTS)
+    create_header_files(expire_flags, constants.TOP_CHARTEVENTS_ITEMID,
+                        constants.TOP_LABEVENTS_ITEMID)
 
-    process_file(chartevents_file, constants.HARUTYUNYAN_2019_MULTITASK_ITEMID_CHARTEVENTS, expire_flags)
-    process_file(labevents_file, constants.HARUTYUNYAN_2019_MULTITASK_ITEMID_LABEVENTS, expire_flags)
+    process_file(chartevents_file, constants.TOP_CHARTEVENTS_ITEMID, expire_flags)
+    process_file(labevents_file, constants.TOP_LABEVENTS_ITEMID, expire_flags)
 
 
 if __name__ == "__main__":

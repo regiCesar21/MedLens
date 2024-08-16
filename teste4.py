@@ -2,9 +2,10 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 # Caminho para o arquivo de dados
-DATA_PATH = "~/dataset/mimic-iii-1.4/reduced30StratNew/CHARTEVENTS.csv"
+DATA_PATH = "/home/me/dataset/mimic-iii-1.4/reduced30StratNew/CHARTEVENTS.csv"
 
 # Função para carregar dados em chunks e calcular estatísticas básicas
 def calculate_stats(chunk, stats_results):
@@ -24,7 +25,10 @@ def calculate_stats(chunk, stats_results):
 # Função para processar o arquivo em chunks
 def process_file(file_path, chunksize=10**5, low_memory=False):
     stats_results = {}
-    for chunk in pd.read_csv(file_path, chunksize=chunksize, low_memory=low_memory):
+    total_rows = sum(1 for _ in open(file_path)) - 1  # Subtraia 1 para ignorar a linha do cabeçalho
+    total_chunks = (total_rows // chunksize) + 1
+
+    for chunk in tqdm(pd.read_csv(file_path, chunksize=chunksize, low_memory=low_memory), total=total_chunks, desc="Processando chunks"):
         stats_results = calculate_stats(chunk, stats_results)
     
     # Calcular a média

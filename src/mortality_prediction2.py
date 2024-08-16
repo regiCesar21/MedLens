@@ -61,7 +61,7 @@ def balanced_label_files(hours, exp_files_num):
 
     num_files_per_label = min(exp_files_num // 2, len(files_dict[0]), len(files_dict[1]))
     if num_files_per_label * 2 < EXP_FILES_NUM:
-        logger.info(f"Only {num_files_per_label * 2}   available when requiring equal labels")
+        logger.info(f"Only {num_files_per_label * 2} available when requiring equal labels")
 
     selected_files_dict = {}
     for label, files in files_dict.items():
@@ -145,8 +145,8 @@ def train_and_evaluate_classifiers(X_train, X_test, y_train, y_test, hour, RF_in
         ("K-Nearest Neighbors", KNeighborsClassifier()),
         ("MLP Classifier", MLPClassifier(random_state=42)),
         ("Logistic Regression", LogisticRegression(random_state=42)),
-        ("XGBoost Classifier", xgb.XGBClassifier(random_state=42)),
-        ("LightGBM Classifier", lgb.LGBMClassifier(random_state=42)),
+        ("XGBoost", xgb.XGBClassifier(random_state=42)),
+        ("LightGBM", lgb.LGBMClassifier(random_state=42)),
     ]
 
     results = []
@@ -214,76 +214,40 @@ def transform_a_ts(rf, ts, window_size):
 
 def interpolation_regression(df_train, df_test, column, window_size=12):
     train_X, train_y = batch_extract_features(df_train[column].values, window_size)
-    rf = RandomForestRegressor(n_estimators=100, random_state=0)
+    rf = RandomForestRegressor()
     rf.fit(train_X, train_y)
+    new_ts_list = []
+    for ts in df_test[column].values:
+        new_ts = transform_a_ts(rf, ts, window_size)
+        new_ts_list.append(new_ts)
+    df_test[column] = new_ts_list
+    return df_test
 
-    test_pred = [transform_a_ts(rf, df_test[column].values[i], window_size) for i in range(len(df_test))]
-    train_pred = [transform_a_ts(rf, df_train[column].values[i], window_size) for i in range(len(df_train))]
 
-    return train_pred, test_pred
+def main(hour):
+    random.seed(123)
+    logger.info(f"Balanced label files ...")
+    files_dict = balanced_label_files([hour], exp_files_num=EXP_FILES_NUM)
+    logger.info(f"Loading data ...")
+    X, y = load_data(hour)
+    X = interpolation_base(X)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
+    logger.info(f"Running interpolation for {hour} ...")
+    for column in tqdm(X_train.columns, desc="Interpolation progress"):
+        X_train = interpolation_regression(X_train, X_train, column)
+        X_test = interpolation_regression(X_test, X_test, column)
 
-def main():
-    hours = [30 * 24]
-    res = []
-    for hour in hours:
-        logger.info(f"\nProcessing {hour} time series data\n")
-        X, y = load_data(hour)
-        X_top_n = X[[str(itemid) for itemid in constants.CORRELATION_TOP_N[:5]]]
-        X_top_n['label'] = y
+    logger.info(f"Training and evaluating classifiers ...")
+    results = train_and_evaluate_classifiers(X_train, X_test, y_train, y_test, hour, True)
 
-        df_train, df_test, _, _ = train_test_split(X_top_n, X_top_n['label'].values, test_size=0.2, random_state=42)
-
-        df_train_filled = pd.DataFrame()
-        df_test_filled = pd.DataFrame()
-        y_train = df_train['label'].values
-        y_test = df_test['label'].values
-
-        for column in df_train.columns:
-            logger.info(f'[Current item_id]: {column}')
-            if column == 'label': continue  # [remove]
-            df_train_filled[column], df_test_filled[column] = interpolation_regression(df_train, df_test, column)
-
-            def nan_cnt(xs):
-                return sum([1 if np.isnan(x) else 0 for x in xs])
-
-            num_nan1 = sum([nan_cnt(vs) for vs in df_test[column].values])
-            num_tot1 = len(df_test) * 720
-            num_nan2 = sum([nan_cnt(vs) for vs in df_test_filled[column].values])
-            num_tot2 = len(df_test_filled) * 720
-            logger.info('Before interpolation, missing rate %s; After interpolation, missing rate %s.',
-                        num_nan1 / num_tot1, num_nan2 / num_tot2)
-
-        df_train_filled = interpolation_base(df_train_filled)
-        df_test_filled = interpolation_base(df_test_filled)
-        df_train_filled['label'] = y_train
-        df_test_filled['label'] = y_test
-
-        df_train = interpolation_base(df_train)
-        df_test = interpolation_base(df_test)
-
-        logger.info('baseline interpolation')
-        df_train_flat = flatten_dataframe(df_train.drop('label', axis=1))
-        df_test_flat = flatten_dataframe(df_test.drop('label', axis=1))
-        res_without_RF = train_and_evaluate_classifiers(df_train_flat, df_test_flat, df_train['label'].values,
-                                                        df_test['label'].values,
-                                                        hour, RF_interpolation=False)
-        res.extend(res_without_RF)
-        logger.info('RF interpolation')
-        df_train_flat = flatten_dataframe(df_train_filled.drop('label', axis=1))
-        df_test_flat = flatten_dataframe(df_test_filled.drop('label', axis=1))
-        res_with_RF = train_and_evaluate_classifiers(df_train_flat, df_test_flat,
-                                                     df_train_filled['label'].values,
-                                                     df_test_filled['label'].values,
-                                                     hour, RF_interpolation=True)
-        res.extend(res_with_RF)
-
-    df = pd.DataFrame(res,
-                      columns=["Hour", "RF Interpolation", "Classifier", "Accuracy", "F1 Score", "AUC-ROC", "AUC-PR"])
-    os.makedirs(PREDICTED_RES_DIR, exist_ok=True)
-    filename = f"predictions_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
-    df.to_csv(os.path.join(PREDICTED_RES_DIR, filename), index=False)
+    results_df = pd.DataFrame(results, columns=['Hour', 'RF Interpolation', 'Classifier', 'Accuracy', 'F1 Score',
+                                                'AUC-ROC', 'AUC-PR'])
+    results_df.to_csv(os.path.join(PREDICTED_RES_DIR, f"predicted_results_{hour}.csv"), index=False)
+    return results_df
 
 
 if __name__ == "__main__":
-    main()
+    hours = [720, 360, 180]
+    for hour in hours:
+        main(hour)
